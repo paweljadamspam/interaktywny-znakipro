@@ -1,8 +1,11 @@
+// server.js
 const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
+const WebSocket = require("ws");
 
 const app = express();
 app.use(cors());
@@ -66,47 +69,58 @@ async function getBalance(address) {
   return balance / 1000000;
 }
 
-// Endpoint /state
+// Endpoint /state (opcjonalnie, dla sprawdzenia)
 app.get("/state", async (req,res)=>{
-  try{
-    // Pobierz obecne salda
+  res.json({
+    unlocked: state.unlocked,
+    totalReceived: state.totalReceived
+  });
+});
+
+// HTTP + WebSocket server
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+// Wyślij stan do wszystkich klientów
+function broadcastState() {
+  const msg = JSON.stringify({
+    unlocked: state.unlocked,
+    totalReceived: state.totalReceived
+  });
+  wss.clients.forEach(client => {
+    if(client.readyState === WebSocket.OPEN) client.send(msg);
+  });
+}
+
+// Polling co 5s
+setInterval(async ()=>{
+  try {
     const balances = [];
-    for(let i=0;i<3;i++){
-      balances[i] = await getBalance(addresses[i]);
-    }
+    for(let i=0;i<3;i++) balances[i] = await getBalance(addresses[i]);
     const fourthBalance = await getBalance(fourthAddress);
 
-    // Sprawdź odblokowania 1-3
+    // Odblokowanie znaków 1-3
     for(let i=0;i<3;i++){
       const diff = balances[i] - state.baseline[i];
-      if(!state.unlocked[i] && diff >= 1){
-        state.unlocked[i] = true;
-      }
+      if(!state.unlocked[i] && diff >= 1) state.unlocked[i] = true;
       state.totalReceived[i] = diff;
     }
 
-    // Sprawdź czwarty adres → odblokuj wszystkie
+    // Odblokowanie wszystkich jeśli saldo czwartego adresu zmieniło się
     if(fourthBalance !== state.baseline[3]){
       state.unlocked = [true,true,true];
     }
 
-    // Zaktualizuj baseline jeśli pierwszy start
-    for(let i=0;i<3;i++){
-      if(state.baseline[i]===0) state.baseline[i] = balances[i];
-    }
-    if(state.baseline[3]===0) state.baseline[3] = fourthBalance;
+    // Inicjalizacja baseline przy pierwszym uruchomieniu
+    for(let i=0;i<3;i++) if(state.baseline[i]===0) state.baseline[i]=balances[i];
+    if(state.baseline[3]===0) state.baseline[3]=fourthBalance;
 
     saveState(state);
+    broadcastState();
 
-    res.json({
-      unlocked: state.unlocked,
-      totalReceived: state.totalReceived
-    });
-
-  }catch(err){
-    console.error(err);
-    res.status(500).json({error:"RPC error"});
+  } catch(e){
+    console.log("Błąd podczas pollingu:", e);
   }
-});
+},5000);
 
-app.listen(PORT,()=>console.log("Backend działa na porcie",PORT));
+server.listen(PORT, ()=>console.log(`Backend + WebSocket działa na porcie ${PORT}`));
