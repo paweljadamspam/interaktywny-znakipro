@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interaktywne Znaki Solana Realtime</title>
+<style>
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#0f172a;
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  height:100vh;
+}
+.container{
+  display:flex;
+  gap:60px;
+  font-size:70px;
+  cursor:pointer;
+}
+.char{
+  position:relative;
+  transition: transform .6s, color .6s;
+}
+.changed{
+  color:#22c55e;
+  transform:scale(1.3);
+}
+.popup{
+  position:absolute;
+  top:0;
+  left:0;
+  transform:translateX(0);
+  background:#1e293b;
+  padding:15px;
+  border-radius:12px;
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  width:220px;
+  z-index:10;
+}
+.popup button{
+  margin-top:10px;
+  padding:6px 10px;
+  border:none;
+  border-radius:6px;
+  background:#6366f1;
+  color:white;
+  cursor:pointer;
+}
+.address-text{
+  font-size:11px;
+  margin-top:8px;
+  word-break:break-all;
+  text-align:center;
+  color:#cbd5e1;
+}
+.stats{
+  margin-top:30px;
+  font-size:16px;
+  color:#cbd5e1;
+}
+</style>
+</head>
+<body>
+
+<div class="container" id="chars">
+  <div class="char" data-idx="0">?</div>
+  <div class="char" data-idx="1">?</div>
+  <div class="char" data-idx="2">?</div>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<!-- QR popups dla każdego znaku -->
+<div class="popup" id="qr0"><canvas></canvas><button>Kopiuj adres</button><div class="address-text"></div></div>
+<div class="popup" id="qr1"><canvas></canvas><button>Kopiuj adres</button><div class="address-text"></div></div>
+<div class="popup" id="qr2"><canvas></canvas><button>Kopiuj adres</button><div class="address-text"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const chars = document.querySelectorAll(".char");
+const stats = document.getElementById("stats");
+const addresses = [
+  "BAQL4y1J8hae4UM9asN8a8RtjZsjShG8XXErEFQN9YDu",
+  "58NojM9qwc7F38oYQAZwDUkArioCbSburkZTBJqLWQd7",
+  "FZK29Xj757Z5qPD78gRm7kiZYqyt6szKrSEwdrxwjmPm"
+];
+let currentChars = ['?','?','?'];
+
+const ws = new WebSocket("wss://interaktywny-znakipro-xjir.onrender.com"); // Twój backend WebSocket
+
+ws.onmessage = e => {
+  const data = JSON.parse(e.data);
+  data.unlocked.forEach((val,i)=>{
+    if(val && currentChars[i]==='?'){
+      currentChars[i]=['w','2','x'][i];
+      chars[i].textContent = currentChars[i];
+      chars[i].classList.add('changed');
+      document.getElementById("qr"+i).style.display='none'; // po odblokowaniu nie pokazuj QR
+    }
+  });
+  stats.innerText="Wpłynęło USDC: "+data.totalReceived.map(v=>v.toFixed(2)).join(" | ");
+}
+
+// Funkcja pokazania QR pod konkretnym znakiem
+chars.forEach((el,i)=>{
+  const qr = document.getElementById("qr"+i);
+  const canvas = qr.querySelector("canvas");
+  const btn = qr.querySelector("button");
+  const addrText = qr.querySelector(".address-text");
+
+  function showQR(){
+    if(currentChars[i]!=='?') return;
+    qr.style.display='flex';
+    const rect = el.getBoundingClientRect();
+    qr.style.top = (rect.bottom + window.scrollY + 5) + "px";
+    qr.style.left = (rect.left + rect.width/2 - 110 + window.scrollX) + "px"; // centrowanie
+    canvas.innerHTML='';
+    new QRCode(canvas,{text:addresses[i],width:150,height:150});
+    addrText.innerText = addresses[i];
+    btn.onclick = ()=>navigator.clipboard.writeText(addresses[i]);
+  }
+
+  el.addEventListener('mouseenter', showQR);
+  el.addEventListener('click', showQR);
+});
+
+// Klik poza popup → zamyka QR
+document.body.addEventListener('click', e=>{
+  chars.forEach((el,i)=>{
+    const qr = document.getElementById("qr"+i);
+    if(!el.contains(e.target) && !qr.contains(e.target)){
+      qr.style.display='none';
+      qr.querySelector("canvas").innerHTML='';
+    }
+  });
+});
+</script>
+</body>
+</html>
