@@ -1,11 +1,13 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
+const fs = require("fs");
 
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
+const STATE_FILE = "./state.json";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -17,9 +19,22 @@ const addresses = [
 
 const fourthAddress = "H2YZvBUUTnU8bVFR5soC7YaApAeBV5vEaPisrrtzxEvH";
 
-let baseline = null;
-let unlocked = [false, false, false];
-let totalReceived = [0, 0, 0];
+function loadState() {
+  if (fs.existsSync(STATE_FILE)) {
+    return JSON.parse(fs.readFileSync(STATE_FILE));
+  }
+  return {
+    baseline: null,
+    unlocked: [false, false, false],
+    totalReceived: [0, 0, 0]
+  };
+}
+
+function saveState(state) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+}
+
+let state = loadState();
 
 async function getBalance(address) {
   const response = await fetch("https://api.mainnet-beta.solana.com", {
@@ -52,36 +67,39 @@ async function getBalance(address) {
 app.get("/state", async (req, res) => {
   try {
 
-    if (!baseline) {
-      baseline = [];
+    if (!state.baseline) {
+      state.baseline = [];
       for (let i = 0; i < 3; i++) {
-        baseline[i] = await getBalance(addresses[i]);
+        state.baseline[i] = await getBalance(addresses[i]);
       }
-      baseline[3] = await getBalance(fourthAddress);
+      state.baseline[3] = await getBalance(fourthAddress);
+      saveState(state);
     }
 
     for (let i = 0; i < 3; i++) {
       const current = await getBalance(addresses[i]);
-      const diff = current - baseline[i];
+      const diff = current - state.baseline[i];
 
-      if (!unlocked[i] && diff >= 1) {
-        unlocked[i] = true;
+      if (!state.unlocked[i] && diff >= 1) {
+        state.unlocked[i] = true;
       }
 
       if (diff > 0) {
-        totalReceived[i] = diff;
+        state.totalReceived[i] = diff;
       }
     }
 
     const fourthCurrent = await getBalance(fourthAddress);
 
-    if (fourthCurrent !== baseline[3]) {
-      unlocked = [true, true, true];
+    if (fourthCurrent !== state.baseline[3]) {
+      state.unlocked = [true, true, true];
     }
 
+    saveState(state);
+
     res.json({
-      unlocked,
-      totalReceived
+      unlocked: state.unlocked,
+      totalReceived: state.totalReceived
     });
 
   } catch (err) {
